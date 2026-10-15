@@ -110,3 +110,51 @@ def simulate_scenario():
         return jsonify({'error': str(e), 'code': 'MODEL_NOT_AVAILABLE'}), 503
     except Exception as e:
         return jsonify({'error': f'Scenario simulation error: {str(e)}'}), 500
+
+@predictions_bp.route('/predictions/future-forecast', methods=['GET', 'POST'])
+def get_future_disaster_forecast():
+    """
+    Generates multi-horizon future disaster forecasts for a micro-zone based on
+    previous historical observation data.
+    """
+    zone_id = None
+    horizons = None
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        zone_id = data.get('zone_id')
+        horizons = data.get('horizons')
+    else:
+        zone_id = request.args.get('zone_id', type=int)
+        horizons_raw = request.args.get('horizons')
+        if horizons_raw:
+            try:
+                horizons = [int(h.strip()) for h in horizons_raw.split(',') if h.strip()]
+            except ValueError:
+                horizons = None
+
+    # If zone_id not specified, find zone with highest risk prediction or first active zone
+    if not zone_id:
+        top_risk_pred = Prediction.query.order_by(Prediction.risk_score.desc()).first()
+        if top_risk_pred:
+            zone_id = top_risk_pred.zone_id
+        else:
+            first_zone = Zone.query.filter_by(is_active=True).first()
+            if first_zone:
+                zone_id = first_zone.id
+
+    if not zone_id:
+        return jsonify({'error': 'No active micro-zone found in database'}), 404
+
+    try:
+        forecast_result = PredictionService.forecast_future_disaster(
+            zone_id=zone_id,
+            horizons=horizons
+        )
+        return jsonify(forecast_result), 200
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'INSUFFICIENT_DATA'}), 400
+    except FileNotFoundError as e:
+        return jsonify({'error': str(e), 'code': 'MODEL_NOT_AVAILABLE'}), 503
+    except Exception as e:
+        return jsonify({'error': f'Future forecast inference error: {str(e)}'}), 500
+

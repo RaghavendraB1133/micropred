@@ -289,7 +289,7 @@ based on 5-year historical disaster patterns.
         """
         # Sanitize app password spaces
         password = password.replace(" ", "").strip() if password else ""
-        subject = "✅ [MICRO-PREDICT AI] Live SMTP Email Gateway Test Successful"
+        subject = "✅ [MICRO-ZONE DISASTER PREDICTION SYSTEM] Live SMTP Email Gateway Test Successful"
         body = f"""
 ================================================================================
 ✅ LIVE SMTP DISASTER ALERT GATEWAY VERIFIED

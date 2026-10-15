@@ -63,7 +63,7 @@ class NotificationService:
             f"has reached CRITICAL DISASTER HAZARD status ({score_pct}% risk probability within next {prediction.prediction_horizon_hours}h). "
             f"Key Triggers: Rainfall: {rain}mm, Barometric Pressure: {press}hPa, Wind: {wind}km/h. "
             f"Advisory: Pre-deployment of inflatable rescue boats, emergency power backups, and vulnerable population evacuation advised. "
-            f"Automated transmission by Micro-Predict AI Engine at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}."
+            f"Automated transmission by Micro-Zone Disaster Prediction System at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}."
         )
 
     @classmethod

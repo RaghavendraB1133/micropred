@@ -9,6 +9,7 @@ import MicroZoneMap from '../components/MicroZoneMap';
 import WeatherTrendChart from '../components/WeatherTrendChart';
 import RiskPieChart from '../components/RiskPieChart';
 import RiskBadge from '../components/RiskBadge';
+import FutureDisasterPrediction from '../components/FutureDisasterPrediction';
 
 export default function Dashboard() {
   const [summaryData, setSummaryData] = useState(null);
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [selectedZone, setSelectedZone] = useState(null);
   const [filterCategory, setFilterCategory] = useState('ALL');
+  const [forecastRefreshKey, setForecastRefreshKey] = useState(0);
 
   const fetchData = async () => {
     setLoading(true);
@@ -45,6 +47,7 @@ export default function Dashboard() {
     try {
       await apiService.runBatchPredictions();
       await fetchData();
+      setForecastRefreshKey((k) => k + 1);
     } catch (err) {
       alert(`Inference failed: ${err.message}`);
     } finally {
@@ -57,6 +60,7 @@ export default function Dashboard() {
     try {
       await apiService.simulateScenario(scenarioName);
       await fetchData();
+      setForecastRefreshKey((k) => k + 1);
     } catch (err) {
       alert(`Scenario simulation failed: ${err.message}`);
     } finally {
@@ -70,6 +74,7 @@ export default function Dashboard() {
       const res = await apiService.syncAllZonesLiveWeather();
       await apiService.runBatchPredictions();
       await fetchData();
+      setForecastRefreshKey((k) => k + 1);
       alert(`🌐 Live Internet Weather Synchronized from Open-Meteo across ${res.results?.length || 5} micro-zones!\nAI risk predictions have been re-assessed using real-time atmospheric observations.`);
     } catch (err) {
       alert(`Live weather sync failed: ${err.message}`);
@@ -117,11 +122,11 @@ export default function Dashboard() {
       {/* Top Banner & Run Prediction Action */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md">
         <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">
-            Micro-Zone Disaster Risk Dashboard
+          <h1 className="text-2xl font-black text-white tracking-tight uppercase">
+            MICRO-ZONE DISASTER PREDICTION SYSTEM
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time hydro-meteorological hazard forecasting with TensorFlow Stacked LSTM
+            Real-time hydro-meteorological hazard forecasting &amp; multi-horizon future disaster prediction with TensorFlow Stacked LSTM
           </p>
         </div>
 
@@ -267,6 +272,17 @@ export default function Dashboard() {
           </Link>
         </div>
       )}
+
+      {/* Future Disaster Prediction Engine (Multi-Horizon Forecast Based on Previous Data) */}
+      <FutureDisasterPrediction
+        key={forecastRefreshKey}
+        zones={zones}
+        initialZoneId={selectedZone?.id}
+        onZoneChange={(zid) => {
+          const matched = zones.find((z) => z.id === zid);
+          if (matched) setSelectedZone(matched);
+        }}
+      />
 
       {/* Main Map & Risk Distribution Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

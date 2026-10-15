@@ -55,15 +55,15 @@ export default function Layout() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight bg-gradient-to-r from-sky-400 to-indigo-300 bg-clip-text text-transparent">
-                  MICRO-PREDICT AI
+                <span className="font-black text-sm md:text-base tracking-tight bg-gradient-to-r from-sky-400 via-cyan-300 to-indigo-300 bg-clip-text text-transparent uppercase">
+                  MICRO-ZONE DISASTER PREDICTION SYSTEM
                 </span>
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800/60 font-medium">
+                <span className="hidden sm:inline-flex text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800/60 font-medium">
                   LSTM Engine
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                Micro-Zone Disaster Prediction System
+                Real-Time Hydro-Meteorological Hazard &amp; Future Forecasting
               </p>
             </div>
           </div>

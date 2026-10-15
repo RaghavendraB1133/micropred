@@ -194,3 +194,270 @@ class PredictionService:
 
         db.session.commit()
         return cls.run_batch_predictions()
+
+    @classmethod
+    def forecast_future_disaster(cls, zone_id: int, horizons: Optional[List[int]] = None) -> Dict[str, Any]:
+        """
+        Generates multi-horizon future disaster forecasts for a micro-zone
+        based on sequential historical observations (previous data).
+        Evaluates physical meteorological momentum and runs TensorFlow Stacked LSTM inference.
+        """
+        from datetime import timedelta
+        if horizons is None:
+            horizons = [6, 12, 18, 24, 36, 48, 72]
+
+        zone = db.session.get(Zone, zone_id)
+        if not zone:
+            raise ValueError(f"Zone with ID {zone_id} does not exist.")
+
+        model, preprocessor = cls.get_model_and_preprocessor()
+
+        # Query recent observations for this zone
+        obs_records = WeatherObservation.query.filter_by(zone_id=zone.id)\
+            .order_by(WeatherObservation.timestamp.desc())\
+            .limit(48).all()
+
+        if not obs_records:
+            raise ValueError(f"No historical weather observations recorded for Zone {zone.zone_code}.")
+
+        obs_dicts = [o.to_dict() for o in reversed(obs_records)]
+        total_prev_rain = sum(float(o.get('rainfall_mm', 0.0)) for o in obs_dicts)
+        avg_prev_wind = float(np.mean([float(o.get('wind_speed_kmh', 10.0)) for o in obs_dicts]))
+        latest_obs = obs_dicts[-1]
+        earliest_obs = obs_dicts[0]
+
+        p_delta = float(latest_obs.get('pressure_hpa', 1013.0)) - float(earliest_obs.get('pressure_hpa', 1013.0))
+        p_rate = p_delta / max(1, len(obs_dicts))
+
+        latest_ts_raw = latest_obs.get('timestamp')
+        if isinstance(latest_ts_raw, str):
+            try:
+                latest_time = datetime.fromisoformat(latest_ts_raw.replace('Z', '+00:00'))
+            except Exception:
+                latest_time = datetime.now(timezone.utc)
+        elif isinstance(latest_ts_raw, datetime):
+            latest_time = latest_ts_raw
+        else:
+            latest_time = datetime.now(timezone.utc)
+
+        trigger_factors = []
+        if total_prev_rain > 50.0:
+            trigger_factors.append(f"Heavy cumulative rainfall ({total_prev_rain:.1f} mm) recorded over previous {len(obs_dicts)} observation steps")
+        elif total_prev_rain > 15.0:
+            trigger_factors.append(f"Moderate cumulative rainfall ({total_prev_rain:.1f} mm) recorded in previous data")
+
+        if p_delta < -8.0:
+            trigger_factors.append(f"Rapid barometric pressure depression ({p_delta:.1f} hPa) indicating approaching deep convective storm system")
+        elif p_delta < -3.0:
+            trigger_factors.append(f"Barometric pressure drop ({p_delta:.1f} hPa) indicating atmospheric instability")
+
+        latest_soil = float(latest_obs.get('soil_moisture_pct', 30.0))
+        if latest_soil > 80.0:
+            trigger_factors.append(f"Elevated soil saturation level ({latest_soil:.1f}%) critically reducing watershed absorption capacity")
+
+        if avg_prev_wind > 45.0:
+            trigger_factors.append(f"High-velocity sustained wind gusts (avg {avg_prev_wind:.1f} km/h)")
+
+        if not trigger_factors:
+            trigger_factors.append("Stable baseline meteorological parameters; no severe precursors detected in previous observations")
+
+        # Step stride for historical timeline points
+        step_stride = max(1, len(obs_dicts) // 5)
+        historical_timeline = []
+        for i in range(0, len(obs_dicts), step_stride):
+            o = obs_dicts[i]
+            ts = o.get('timestamp')
+            hours_ago = 0
+            if isinstance(ts, str):
+                try:
+                    t_parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    hours_ago = int((latest_time - t_parsed).total_seconds() / 3600)
+                except Exception:
+                    hours_ago = (len(obs_dicts) - 1 - i)
+            elif isinstance(ts, datetime):
+                hours_ago = int((latest_time - ts).total_seconds() / 3600)
+            else:
+                hours_ago = (len(obs_dicts) - 1 - i)
+
+            # Compute historical baseline score for sequential chart
+            rain_val = float(o.get('rainfall_mm', 0.0))
+            wind_val = float(o.get('wind_speed_kmh', 10.0))
+            soil_val = float(o.get('soil_moisture_pct', 30.0))
+            press_val = float(o.get('pressure_hpa', 1013.0))
+            raw_hazard = (rain_val / 90.0) * 0.5 + (wind_val / 80.0) * 0.3 + (soil_val / 100.0) * 0.2 + max(0.0, (1013.0 - press_val) / 30.0) * 0.3
+            hist_calib = MicroZoneRiskEngine.calibrate_score(min(0.98, raw_hazard))
+            hist_pct = round(hist_calib * 100.0, 1)
+
+            label = "NOW" if i == len(obs_dicts) - 1 else f"-{abs(hours_ago)}h"
+            historical_timeline.append({
+                'label': label,
+                'timestamp': ts,
+                'rainfall_mm': round(rain_val, 1),
+                'wind_speed_kmh': round(wind_val, 1),
+                'pressure_hpa': round(press_val, 1),
+                'soil_moisture_pct': round(soil_val, 1),
+                'risk_score_pct': hist_pct,
+                'is_future': False
+            })
+
+        future_forecasts = []
+        is_active_storm = float(latest_obs.get('rainfall_mm', 0.0)) > 15.0 or float(latest_obs.get('pressure_hpa', 1013.0)) < 1000.0 or float(latest_obs.get('wind_speed_kmh', 0.0)) > 35.0
+
+        for h in horizons:
+            proj_time = latest_time + timedelta(hours=h)
+            if is_active_storm:
+                if h <= 18:
+                    curve_factor = 1.0 + (h / 18.0) * 0.35
+                elif h <= 36:
+                    curve_factor = 1.35 - ((h - 18) / 18.0) * 0.45
+                else:
+                    curve_factor = max(0.2, 0.90 - ((h - 36) / 36.0) * 0.70)
+            else:
+                curve_factor = 0.95 + 0.1 * np.sin(h * np.pi / 12.0)
+
+            sim_seq = []
+            for step in range(24):
+                step_h = h - (24 - step)
+                sim_step_time = latest_time + timedelta(hours=step_h)
+                if step_h <= 0 and (len(obs_dicts) + step_h - 1) >= 0:
+                    base = obs_dicts[max(0, len(obs_dicts) + step_h - 1)]
+                    sim_seq.append({
+                        'timestamp': base.get('timestamp', sim_step_time.isoformat()),
+                        'rainfall_mm': float(base.get('rainfall_mm', 0.0)),
+                        'temperature_c': float(base.get('temperature_c', 25.0)),
+                        'humidity_pct': float(base.get('humidity_pct', 60.0)),
+                        'wind_speed_kmh': float(base.get('wind_speed_kmh', 10.0)),
+                        'pressure_hpa': float(base.get('pressure_hpa', 1013.0)),
+                        'soil_moisture_pct': float(base.get('soil_moisture_pct', 30.0))
+                    })
+                else:
+                    step_factor = curve_factor if step_h > 0 else 1.0
+                    rain = round(max(0.0, float(latest_obs.get('rainfall_mm', 0.0)) * step_factor), 2)
+                    wind = round(max(5.0, float(latest_obs.get('wind_speed_kmh', 10.0)) * step_factor), 2)
+                    hum = round(min(100.0, max(40.0, float(latest_obs.get('humidity_pct', 60.0)) * (0.95 + 0.05 * step_factor))), 1)
+                    press = round(max(960.0, min(1025.0, float(latest_obs.get('pressure_hpa', 1013.0)) - (step_factor - 1.0) * 8.0)), 2)
+                    soil = round(min(100.0, max(10.0, float(latest_obs.get('soil_moisture_pct', 30.0)) + (step_factor - 1.0) * 5.0)), 1)
+                    temp = round(float(latest_obs.get('temperature_c', 26.0)) - (step_factor - 1.0) * 1.5, 1)
+                    sim_seq.append({
+                        'timestamp': sim_step_time.isoformat(),
+                        'rainfall_mm': rain,
+                        'temperature_c': temp,
+                        'humidity_pct': hum,
+                        'wind_speed_kmh': wind,
+                        'pressure_hpa': press,
+                        'soil_moisture_pct': soil
+                    })
+
+            df_sim = pd.DataFrame(sim_seq)
+            input_tensor = preprocessor.prepare_inference_sequence(df_sim)
+            raw_pred = model.predict(input_tensor, verbose=0)
+            raw_prob = float(raw_pred[0][0])
+            risk_score = MicroZoneRiskEngine.calibrate_score(raw_prob)
+            category = MicroZoneRiskEngine.classify(risk_score)
+
+            last_step = sim_seq[-1]
+            if category == 'HIGH':
+                if last_step['rainfall_mm'] >= 30.0 or last_step['soil_moisture_pct'] >= 80.0:
+                    disaster_name = "Severe Flash Flood & Inundation Surge"
+                    advisory = "Critical inundation threat. Activate flood barriers and deploy NDRF rescue craft to vulnerable lowlands."
+                elif last_step['wind_speed_kmh'] >= 50.0:
+                    disaster_name = "High-Intensity Cyclonic Gale & Storm Surge"
+                    advisory = "Severe gale advisory. Halt maritime departures, secure power infrastructure, and enforce coastal setbacks."
+                else:
+                    disaster_name = "Critical Multi-Hazard Weather Inundation"
+                    advisory = "Emergency command center standby. Pre-position medical and relief convoys."
+            elif category == 'MEDIUM':
+                disaster_name = "Elevated Hydro-Meteorological Hazard Advisory"
+                advisory = "Heightened runoff alert. Inspect drainage culverts, clear sediment catchments, and issue local travel warnings."
+            else:
+                disaster_name = "Sub-threshold / Normal Meteorological Baseline"
+                advisory = "Routine ambient monitoring. Atmospheric indicators remain well within safe thresholds."
+
+            future_forecasts.append({
+                'horizon_hours': h,
+                'projected_timestamp': proj_time.isoformat(),
+                'time_label': f"+{h}h",
+                'risk_score': risk_score,
+                'risk_category': category,
+                'predicted_disaster': disaster_name,
+                'early_warning_advisory': advisory,
+                'projected_rainfall_mm': round(last_step['rainfall_mm'], 1),
+                'projected_wind_kmh': round(last_step['wind_speed_kmh'], 1),
+                'projected_pressure_hpa': round(last_step['pressure_hpa'], 1),
+                'projected_soil_moisture_pct': round(last_step['soil_moisture_pct'], 1),
+                'confidence_pct': round(float(85.0 + (1.0 - abs(risk_score - 0.5)) * 14.0), 1),
+                'is_future': True
+            })
+
+        max_pred = max(future_forecasts, key=lambda x: x['risk_score'])
+        overall_tier = max_pred['risk_category']
+        peak_horizon = max_pred['horizon_hours']
+
+        # Unified combined timeline for charts
+        combined_timeline = []
+        for h_point in historical_timeline:
+            combined_timeline.append({
+                'label': h_point['label'],
+                'timestamp': h_point['timestamp'],
+                'rainfall_mm': h_point['rainfall_mm'],
+                'wind_speed_kmh': h_point['wind_speed_kmh'],
+                'pressure_hpa': h_point['pressure_hpa'],
+                'soil_moisture_pct': h_point['soil_moisture_pct'],
+                'risk_score_pct': h_point['risk_score_pct'],
+                'future_risk_pct': None,
+                'is_future': False
+            })
+
+        # NOW Anchor point
+        now_risk_pct = round(float(future_forecasts[0]['risk_score'] * 100), 1)
+        combined_timeline.append({
+            'label': 'NOW (T0)',
+            'timestamp': latest_time.isoformat(),
+            'rainfall_mm': round(float(latest_obs.get('rainfall_mm', 0.0)), 1),
+            'wind_speed_kmh': round(float(latest_obs.get('wind_speed_kmh', 0.0)), 1),
+            'pressure_hpa': round(float(latest_obs.get('pressure_hpa', 1013.0)), 1),
+            'soil_moisture_pct': round(float(latest_obs.get('soil_moisture_pct', 30.0)), 1),
+            'risk_score_pct': now_risk_pct,
+            'future_risk_pct': now_risk_pct,
+            'is_future': False
+        })
+
+        for f_point in future_forecasts:
+            combined_timeline.append({
+                'label': f_point['time_label'],
+                'timestamp': f_point['projected_timestamp'],
+                'rainfall_mm': f_point['projected_rainfall_mm'],
+                'wind_speed_kmh': f_point['projected_wind_kmh'],
+                'pressure_hpa': f_point['projected_pressure_hpa'],
+                'soil_moisture_pct': f_point['projected_soil_moisture_pct'],
+                'risk_score_pct': None,
+                'future_risk_pct': round(float(f_point['risk_score'] * 100), 1),
+                'risk_category': f_point['risk_category'],
+                'predicted_disaster': f_point['predicted_disaster'],
+                'is_future': True
+            })
+
+        return {
+            'zone': zone.to_dict(),
+            'historical_summary': {
+                'observations_count': len(obs_dicts),
+                'observation_window_label': f"Previous {len(obs_dicts)} Hours of Sequential Data",
+                'total_rainfall_mm': round(total_prev_rain, 1),
+                'average_wind_kmh': round(avg_prev_wind, 1),
+                'latest_pressure_hpa': round(float(latest_obs.get('pressure_hpa', 1013.0)), 1),
+                'pressure_trend_delta': round(p_delta, 1),
+                'soil_saturation_pct': round(latest_soil, 1),
+                'trend_pattern': 'Active Storm Front' if is_active_storm else 'Calm Baseline',
+            },
+            'trigger_factors': trigger_factors,
+            'peak_hazard_window': f"+{peak_horizon}h Ahead ({max_pred['predicted_disaster']})",
+            'peak_risk_score': max_pred['risk_score'],
+            'overall_future_tier': overall_tier,
+            'future_forecasts': future_forecasts,
+            'combined_timeline': combined_timeline,
+            'scientific_methodology': (
+                "Autoregressive meteorological projection combined with TensorFlow Stacked LSTM sequential feature inference. "
+                "Calculates future disaster probability curves directly from the historical observation gradient."
+            )
+        }
+

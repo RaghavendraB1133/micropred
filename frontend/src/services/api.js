@@ -90,6 +90,14 @@ export const apiService = {
     return res.data;
   },
 
+  getFutureDisasterForecast: async (zoneId = null, horizons = null) => {
+    const params = {};
+    if (zoneId) params.zone_id = zoneId;
+    if (horizons) params.horizons = Array.isArray(horizons) ? horizons.join(',') : horizons;
+    const res = await apiClient.get('/predictions/future-forecast', { params });
+    return res.data;
+  },
+
   // Datasets
   getDatasetStatus: async () => {
     const res = await apiClient.get('/datasets/status');
