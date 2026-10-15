@@ -1,4 +1,4 @@
-# Human Behavior Aware Micro-Zone Disaster Prediction System Using AI
+# Micro-Zone Disaster Prediction System Using AI
 
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.1.3-emerald.svg)](https://palletsprojects.com/p/flask/)
@@ -21,13 +21,6 @@
 2. **Micro-Zone Disaster Prediction**:
    - Instead of predicting for an entire state, the region is divided into localized **Micro-Zones** (Coastal Lowland, River Basin, Urban Metro).
    - Classifies risk into **Low Risk (< 35%)**, **Medium Risk (35%–70%)**, and **High Risk (≥ 70%)**.
-
-3. **Human Behavior Awareness ("How Humans Become Aware")**:
-   - Provides clear, actionable safety instructions for the public:
-     - 🏃 **Immediate Actions**: Evacuate to higher municipal shelters, turn off electrical mains and gas.
-     - 🎒 **Emergency Kit Checklist**: 3-day drinking water, food rations, torch, medicines, waterproof documents.
-     - 🤝 **Community Behavior**: Do not spread unverified rumors, assist elderly and vulnerable neighbors.
-     - 📞 **Emergency Contacts**: DDMA (1077), State SEOC (1070), NDRF (044-27473000), Municipal (1913).
 
 4. **Automated Email Alert Notifications**:
    - Whenever High Risk is detected, the system **automatically sends a Disaster Warning Email** to registered authorities and citizens containing the hazard alert and the complete Human Safety Advisory.
