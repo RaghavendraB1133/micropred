@@ -1,4 +1,4 @@
-# HUMAN BEHAVIOR AWARE MICRO-ZONE DISASTER PREDICTION SYSTEM USING AI
+# MICRO-ZONE DISASTER PREDICTION SYSTEM USING AI
 
 > **Final-Year Project Overview**: A simple, clear AI disaster early-warning system that predicts localized disasters from 5 years of historical data, makes people aware through human safety guidance, and sends automated email alert notifications.
 
@@ -30,12 +30,7 @@
   - **🟡 MEDIUM RISK (35% – 70%):** Elevated weather activity; watch advisory.
   - **🔴 HIGH RISK (≥ 70%):** Critical disaster hazard detected!
 
-## 3. Human Behavior Awareness ("How Humans Become Aware")
-When a disaster is predicted, the system provides practical, life-saving guidance so people know exactly how to react:
-- 🏃 **Immediate Human Actions:** Evacuate to higher municipal relief shelters; turn off electrical mains and LPG gas.
-- 🎒 **Essential Emergency Kit:** 3-day drinking water, non-perishable rations, flashlight, medicines, and waterproof documents.
-- 🤝 **Community & Behavioral Support:** Stay calm, do not spread unverified rumors, assist elderly neighbors and children.
-- 📞 **Emergency Helplines:** DDMA (1077), State SEOC (1070), NDRF Command (044-27473000), Municipal Help (1913).
+
 
 ## 4. Automated Email Alert Notification
 - Whenever **HIGH RISK** is predicted, the system **automatically dispatches an Email Alert** to registered authorities and citizens.
